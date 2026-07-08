@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         Pure Zhihu
-// @namespace    https://github.com/YOUR_GITHUB_USERNAME/pure-zhihu
-// @version      0.4.2
+// @author       squarezhong
+// @namespace    https://github.com/squarezhong/pure-zhihu
+// @version      0.4.3
 // @description  大幅简化知乎：默认进入关注流，隐藏顶栏噪音和指定侧边栏模块，并支持严格模式过滤“赞同了回答”动态。
-// @homepageURL  https://github.com/YOUR_GITHUB_USERNAME/pure-zhihu
-// @supportURL   https://github.com/YOUR_GITHUB_USERNAME/pure-zhihu/issues
-// @updateURL    https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/pure-zhihu/main/pure-zhihu.user.js
-// @downloadURL  https://raw.githubusercontent.com/YOUR_GITHUB_USERNAME/pure-zhihu/main/pure-zhihu.user.js
+// @homepageURL  https://github.com/squarezhong/pure-zhihu
+// @supportURL   https://github.com/squarezhong/pure-zhihu/issues
+// @updateURL    https://raw.githubusercontent.com/squarezhong/pure-zhihu/main/pure-zhihu.user.js
+// @downloadURL  https://raw.githubusercontent.com/squarezhong/pure-zhihu/main/pure-zhihu.user.js
 // @match        https://www.zhihu.com/
 // @match        https://www.zhihu.com/*
 // @run-at       document-start
