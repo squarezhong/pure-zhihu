@@ -2,8 +2,8 @@
 // @name         Pure Zhihu
 // @author       squarezhong
 // @namespace    https://github.com/squarezhong/pure-zhihu
-// @version      0.4.3
-// @description  大幅简化知乎：默认进入关注流，隐藏顶栏噪音和指定侧边栏模块，并支持严格模式过滤“赞同了回答”动态。
+// @version      0.4.4
+// @description  大幅简化知乎：默认进入关注流，在全站隐藏顶栏噪音和指定侧边栏模块，并支持严格模式过滤“赞同了回答”动态。
 // @homepageURL  https://github.com/squarezhong/pure-zhihu
 // @supportURL   https://github.com/squarezhong/pure-zhihu/issues
 // @updateURL    https://raw.githubusercontent.com/squarezhong/pure-zhihu/main/pure-zhihu.user.js
@@ -233,7 +233,7 @@
       return;
     }
 
-    root.classList.toggle(ACTIVE_CLASS, isManagedPage() || isHomePage());
+    root.classList.toggle(ACTIVE_CLASS, isManagedPage());
     root.classList.toggle(STRICT_CLASS, mode === MODE_STRICT);
   }
 
@@ -655,15 +655,11 @@
   }
 
   function isManagedPage() {
-    return isZhihuHost() && (isHomePage() || isFollowPage());
+    return isZhihuHost();
   }
 
   function isHomePage() {
     return window.location.pathname === '/';
-  }
-
-  function isFollowPage() {
-    return /^\/follow(?:\/)?$/.test(window.location.pathname);
   }
 
   function isZhihuHost() {
