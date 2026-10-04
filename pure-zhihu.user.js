@@ -2,7 +2,7 @@
 // @name         Pure Zhihu
 // @author       squarezhong
 // @namespace    https://github.com/squarezhong/pure-zhihu
-// @version      0.4.8
+// @version      0.4.9
 // @description  大幅简化知乎：默认进入关注流，隐藏广告、顶栏噪音和指定侧栏模块；严格模式过滤赞同动态及折叠动态入口。
 // @homepageURL  https://github.com/squarezhong/pure-zhihu
 // @supportURL   https://github.com/squarezhong/pure-zhihu/issues
@@ -29,7 +29,7 @@
   const STYLE_ID = 'pure-zhihu-style';
   const HEADER_CHANNEL_TEXTS = ['推荐', '热榜', '专栏', '圈子', '故事'];
   const HEADER_ACTION_TEXTS = ['直播', '直答', '知乎直答'];
-  const SIDEBAR_BLOCK_TEXTS = ['大家都在搜', '盐言作者平台', '付费咨询', '知乎知学堂'];
+  const SIDEBAR_BLOCK_TEXTS = ['大家都在搜', '推荐关注', '盐言作者平台', '付费咨询', '知乎知学堂'];
   const SIDEBAR_ROOTS = 'aside, .GlobalSideBar, .TopstorySideBar, [class*="SideBar"], [class*="Sidebar"], [class*="sideColumn"], [class*="SideColumn"]';
   const CONTENT_ROOTS = 'article, .TopstoryItem, .List-item, .ContentItem, .RichContent, .RichText, .AnswerItem, .QuestionHeader, .CommentItem, [role="dialog"], [contenteditable="true"]';
   const AD_MODULES = '.TopstoryItem--advertCard, .Pc-feedAd, .Pc-feedAd-new, .Pc-card, .AdvertCard, .Question-sideColumnAdContainer';
@@ -86,7 +86,7 @@
       if (!target) return;
       const style = document.createElement('style');
       style.id = STYLE_ID;
-      style.dataset.pureZhihuVersion = '0.4.8';
+      style.dataset.pureZhihuVersion = '0.4.9';
       style.textContent = `
         ${AD_MODULES.split(', ').map((selector) => `html.${ACTIVE_CLASS} ${selector}`).join(',\n')} {
           display: none !important;
