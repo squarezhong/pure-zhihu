@@ -2,14 +2,13 @@
 // @name         Pure Zhihu
 // @author       squarezhong
 // @namespace    https://github.com/squarezhong/pure-zhihu
-// @version      0.4.4
-// @description  大幅简化知乎：默认进入关注流，在全站隐藏顶栏噪音和指定侧边栏模块，并支持严格模式过滤“赞同了回答”动态。
+// @version      0.4.7
+// @description  大幅简化知乎：默认进入关注流，隐藏广告、顶栏噪音和指定侧栏模块；严格模式过滤赞同动态及折叠动态入口。
 // @homepageURL  https://github.com/squarezhong/pure-zhihu
 // @supportURL   https://github.com/squarezhong/pure-zhihu/issues
 // @updateURL    https://raw.githubusercontent.com/squarezhong/pure-zhihu/main/pure-zhihu.user.js
 // @downloadURL  https://raw.githubusercontent.com/squarezhong/pure-zhihu/main/pure-zhihu.user.js
-// @match        https://www.zhihu.com/
-// @match        https://www.zhihu.com/*
+// @match        https://*.zhihu.com/*
 // @run-at       document-start
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -29,13 +28,19 @@
   const STRICT_CLASS = 'pure-zhihu-strict';
   const STYLE_ID = 'pure-zhihu-style';
   const HEADER_CHANNEL_TEXTS = ['推荐', '热榜', '专栏', '圈子', '故事'];
-  const HEADER_PARTIAL_TEXTS = ['AI Works'];
-  const HEADER_ACTION_TEXTS = ['直播', '直答'];
+  const HEADER_ACTION_TEXTS = ['直播', '直答', '知乎直答'];
   const SIDEBAR_BLOCK_TEXTS = ['大家都在搜', '盐言作者平台', '付费咨询', '知乎知学堂'];
-  const STRICT_DYNAMIC_TEXTS = ['赞同了回答', '赞同了文章', '赞同了想法', '赞同了视频'];
+  const SIDEBAR_ROOTS = 'aside, .GlobalSideBar, .TopstorySideBar, [class*="SideBar"], [class*="Sidebar"], [class*="sideColumn"], [class*="SideColumn"]';
+  const CONTENT_ROOTS = 'article, .TopstoryItem, .List-item, .ContentItem, .RichContent, .RichText, .AnswerItem, .QuestionHeader, .CommentItem, [role="dialog"], [contenteditable="true"]';
+  const AD_MODULES = '.TopstoryItem--advertCard, .Pc-feedAd, .Pc-feedAd-new, .Pc-card, .AdvertCard, .Question-sideColumnAdContainer';
+  const AD_CONTENT = '.RichContent, .RichText, .AnswerItem, .CommentItem, article, [contenteditable="true"]';
+  const NAVIGATION = 'nav, .AppHeader-Tabs, [role="navigation"]';
+  const CONTROLS = 'a, button, [role="tab"], [role="link"], [role="button"]';
 
   let mode = getStoredMode();
   let applyScheduled = false;
+  let hidden = new Set();
+  let strictHidden = new Set();
 
   injectStyle();
   syncRootClasses();
@@ -46,100 +51,55 @@
   scheduleApply();
 
   function getStoredMode() {
-    const stored = gmGetValue(STORAGE_KEY, MODE_DIFFUSE);
-    return stored === MODE_STRICT ? MODE_STRICT : MODE_DIFFUSE;
-  }
-
-  function gmGetValue(key, fallback) {
     try {
-      if (typeof GM_getValue === 'function') {
-        return GM_getValue(key, fallback);
-      }
+      return typeof GM_getValue === 'function' && GM_getValue(STORAGE_KEY, MODE_DIFFUSE) === MODE_STRICT
+        ? MODE_STRICT : MODE_DIFFUSE;
     } catch (_) {
-      // Fall through to the default value.
-    }
-    return fallback;
-  }
-
-  function gmSetValue(key, value) {
-    try {
-      if (typeof GM_setValue === 'function') {
-        GM_setValue(key, value);
-      }
-    } catch (_) {
-      // Ignore storage failures; the current page can still be cleaned.
+      return MODE_DIFFUSE;
     }
   }
 
   function registerMenu() {
-    if (typeof GM_registerMenuCommand !== 'function') {
-      return;
-    }
-
+    if (typeof GM_registerMenuCommand !== 'function') return;
     const nextMode = mode === MODE_STRICT ? MODE_DIFFUSE : MODE_STRICT;
     const currentLabel = mode === MODE_STRICT ? '严格模式' : '扩散模式';
     const nextLabel = nextMode === MODE_STRICT ? '严格模式' : '扩散模式';
-
-    GM_registerMenuCommand(
-      `Pure Zhihu：切换到${nextLabel}（当前：${currentLabel}）`,
-      () => {
-        mode = nextMode;
-        gmSetValue(STORAGE_KEY, nextMode);
-        window.location.reload();
+    GM_registerMenuCommand(`Pure Zhihu：切换到${nextLabel}（当前：${currentLabel}）`, () => {
+      mode = mode === MODE_STRICT ? MODE_DIFFUSE : MODE_STRICT;
+      try {
+        if (typeof GM_setValue !== 'function') throw new Error('Storage unavailable');
+        GM_setValue(STORAGE_KEY, mode);
+      } catch (_) {
+        // Keep the selected mode usable on this page when storage is unavailable.
+        scheduleApply();
+        return;
       }
-    );
-
-    GM_registerMenuCommand('Pure Zhihu：重新应用规则', () => {
-      clearHiddenClasses();
-      syncRootClasses();
-      applyRules();
+      window.location.reload();
     });
+    GM_registerMenuCommand('Pure Zhihu：重新应用规则', applyRules);
   }
 
   function injectStyle() {
-    const style = document.createElement('style');
-    style.id = STYLE_ID;
-    style.textContent = `
-      html.${ACTIVE_CLASS} .${HIDDEN_CLASS},
-      html.${ACTIVE_CLASS}.${STRICT_CLASS} .${STRICT_HIDDEN_CLASS} {
-        display: none !important;
-      }
-
-      html.${ACTIVE_CLASS} header input::placeholder,
-      html.${ACTIVE_CLASS} .AppHeader input::placeholder,
-      html.${ACTIVE_CLASS} [class*="Search"] input::placeholder {
-        color: transparent !important;
-        opacity: 0 !important;
-      }
-
-      html.${ACTIVE_CLASS} .${SEARCH_CONTAINER_CLASS} {
-        margin-right: 24px !important;
-      }
-
-      html.${ACTIVE_CLASS} .AppHeader-Tabs,
-      html.${ACTIVE_CLASS} [class*="AppHeader-Tabs"] {
-        border-right: 0 !important;
-      }
-
-      html.${ACTIVE_CLASS} .AppHeader-Tabs::before,
-      html.${ACTIVE_CLASS} .AppHeader-Tabs::after,
-      html.${ACTIVE_CLASS} [class*="AppHeader-Tabs"]::before,
-      html.${ACTIVE_CLASS} [class*="AppHeader-Tabs"]::after {
-        content: none !important;
-        display: none !important;
-      }
-    `;
-
     const attach = () => {
-      if (document.getElementById(STYLE_ID)) {
-        return;
-      }
+      if (document.getElementById(STYLE_ID)) return;
       const target = document.head || document.documentElement;
-      if (target) {
-        target.appendChild(style);
-      }
+      if (!target) return;
+      const style = document.createElement('style');
+      style.id = STYLE_ID;
+      style.dataset.pureZhihuVersion = '0.4.7';
+      style.textContent = `
+        ${AD_MODULES.split(', ').map((selector) => `html.${ACTIVE_CLASS} ${selector}`).join(',\n')} {
+          display: none !important;
+        }
+        html.${ACTIVE_CLASS} .${HIDDEN_CLASS},
+        html.${ACTIVE_CLASS}.${STRICT_CLASS} .${STRICT_HIDDEN_CLASS} { display: none !important; }
+        html.${ACTIVE_CLASS} .${SEARCH_CONTAINER_CLASS} { margin-right: 24px !important; }
+        html.${ACTIVE_CLASS} .AppHeader-Tabs { border-right: 0 !important; }
+        html.${ACTIVE_CLASS} .AppHeader-Tabs::before,
+        html.${ACTIVE_CLASS} .AppHeader-Tabs::after { content: none !important; display: none !important; }
+      `;
+      target.appendChild(style);
     };
-
     attach();
     if (!document.getElementById(STYLE_ID)) {
       document.addEventListener('DOMContentLoaded', attach, { once: true });
@@ -149,35 +109,40 @@
   function bindLifecycleEvents() {
     document.addEventListener('DOMContentLoaded', scheduleApply, { once: true });
     window.addEventListener('load', scheduleApply, { once: true });
+    window.addEventListener('pageshow', onRouteChanged);
     window.addEventListener('popstate', onRouteChanged);
-
     const startObserver = () => {
-      const target = document.documentElement || document.body;
-      if (!target) {
+      if (!document.documentElement) {
         window.setTimeout(startObserver, 50);
         return;
       }
-
-      const observer = new MutationObserver(() => {
-        scheduleApply();
+      const observer = new MutationObserver((records) => {
+        if (records.some((record) => {
+          if (record.type !== 'attributes' || record.attributeName !== 'class') return true;
+          // Ignore our own class changes, but handle React reusing an existing node.
+          const withoutOurs = (value) => String(value || '').split(/\s+/)
+            .filter((name) => name && !name.startsWith('pure-zhihu-')).sort().join(' ');
+          const removedHiddenClass = [HIDDEN_CLASS, STRICT_HIDDEN_CLASS].some((name) =>
+            String(record.oldValue || '').split(/\s+/).includes(name) &&
+            !record.target.classList.contains(name) &&
+            (name === HIDDEN_CLASS ? hidden : strictHidden).has(record.target)
+          );
+          return removedHiddenClass || withoutOurs(record.oldValue) !== withoutOurs(record.target.className);
+        })) scheduleApply();
       });
-      observer.observe(target, {
-        childList: true,
-        subtree: true
+      observer.observe(document.documentElement, {
+        childList: true, subtree: true, characterData: true,
+        attributes: true, attributeOldValue: true,
+        attributeFilter: ['class', 'href', 'aria-label', 'title', 'placeholder']
       });
     };
-
     startObserver();
   }
 
   function patchHistory() {
-    ['pushState', 'replaceState'].forEach((methodName) => {
-      const original = window.history[methodName];
-      if (typeof original !== 'function') {
-        return;
-      }
-
-      window.history[methodName] = function patchedHistoryMethod() {
+    ['pushState', 'replaceState'].forEach((name) => {
+      const original = window.history[name];
+      window.history[name] = function () {
         const result = original.apply(this, arguments);
         onRouteChanged();
         return result;
@@ -192,18 +157,13 @@
   }
 
   function redirectHomeToFollow() {
-    if (!isZhihuHost() || !isHomePage()) {
-      return;
+    if (window.location.hostname === 'www.zhihu.com' && window.location.pathname === '/') {
+      window.location.replace(`${window.location.origin}/follow${window.location.search}${window.location.hash}`);
     }
-
-    window.location.replace(`${window.location.origin}/follow`);
   }
 
   function scheduleApply() {
-    if (applyScheduled) {
-      return;
-    }
-
+    if (applyScheduled) return;
     applyScheduled = true;
     window.requestAnimationFrame(() => {
       applyScheduled = false;
@@ -212,458 +172,159 @@
   }
 
   function applyRules() {
+    injectStyle();
     syncRootClasses();
-    clearHiddenClasses();
-
-    if (!isManagedPage()) {
-      return;
+    redirectHomeToFollow();
+    hidden = new Set();
+    strictHidden = new Set();
+    if (isManagedPage()) {
+      cleanTopChrome();
+      cleanSidebarBlocks();
+      cleanAdvertisements();
+      if (mode === MODE_STRICT && window.location.hostname === 'www.zhihu.com' && /^\/follow\/?$/.test(window.location.pathname)) cleanStrictDynamics();
     }
+    // Reconcile only differences: do not unhide/re-hide the whole feed every frame.
+    reconcile(HIDDEN_CLASS, hidden);
+    reconcile(STRICT_HIDDEN_CLASS, strictHidden);
+  }
 
-    cleanTopChrome();
-    cleanSidebarBlocks();
-
-    if (mode === MODE_STRICT) {
-      cleanStrictDynamics();
-    }
+  function reconcile(className, desired) {
+    document.querySelectorAll(`.${className}`).forEach((element) => {
+      if (!desired.has(element)) element.classList.remove(className);
+    });
+    desired.forEach((element) => {
+      if (!element.classList.contains(className)) element.classList.add(className);
+    });
   }
 
   function syncRootClasses() {
     const root = document.documentElement;
-    if (!root) {
-      return;
-    }
-
+    if (!root) return;
     root.classList.toggle(ACTIVE_CLASS, isManagedPage());
     root.classList.toggle(STRICT_CLASS, mode === MODE_STRICT);
   }
 
-  function clearHiddenClasses() {
-    document
-      .querySelectorAll(`.${HIDDEN_CLASS}, .${STRICT_HIDDEN_CLASS}`)
-      .forEach((element) => {
-        element.classList.remove(HIDDEN_CLASS, STRICT_HIDDEN_CLASS);
-      });
-  }
-
   function cleanTopChrome() {
-    const headerCandidates = uniqueElements([
-      ...document.querySelectorAll('header, .AppHeader, [class*="AppHeader"]')
-    ]).filter(isLikelyGlobalHeader);
-
-    headerCandidates.forEach((header) => {
-      hideHeaderNoise(header);
-      cleanSearchRecommendations(header);
-      hideHeaderSeparators(header);
-    });
-  }
-
-  function hideHeaderNoise(header) {
-    const controls = header.querySelectorAll(
-      'a, button, [role="tab"], [role="link"], [role="button"]'
-    );
-    controls.forEach((control) => {
-      if (isHeaderNoiseLabel(getElementLabel(control))) {
-        hide(findCompactHeaderBlock(control, header));
-      }
-    });
-  }
-
-  function hideHeaderSeparators(header) {
-    const dividerCandidates = header.querySelectorAll(
-      '[class*="Divider"], [class*="divider"], [class*="Separator"], [class*="separator"]'
-    );
-
-    dividerCandidates.forEach((element) => {
-      if (isCompactHeaderSeparator(element)) {
-        hide(element);
-      }
-    });
-
-    hideFollowTrailingSeparators(header);
-  }
-
-  function isCompactHeaderSeparator(element) {
-    const rect = element.getBoundingClientRect();
-    return rect.width <= 28 && rect.height <= 48;
-  }
-
-  function hideFollowTrailingSeparators(header) {
-    const followEntry = findHeaderFollowEntry(header);
-    const searchContainer = findHeaderSearchContainer(header);
-    if (!followEntry) {
-      return;
-    }
-
-    const followRect = followEntry.getBoundingClientRect();
-    const searchRect = searchContainer ? searchContainer.getBoundingClientRect() : null;
-    const leftBound = followRect.right - 2;
-    const rightBound = searchRect ? searchRect.left - 4 : followRect.right + 120;
-
-    Array.from(header.querySelectorAll('*')).forEach((element) => {
-      if (
-        element === followEntry ||
-        element.contains(followEntry) ||
-        followEntry.contains(element) ||
-        (searchContainer && (element === searchContainer || element.contains(searchContainer)))
-      ) {
-        return;
-      }
-
-      const rect = element.getBoundingClientRect();
-      if (
-        rect.width > 0 &&
-        rect.width <= 36 &&
-        rect.height >= 8 &&
-        rect.height <= 64 &&
-        rect.left >= leftBound &&
-        rect.left < rightBound &&
-        isSeparatorLikeElement(element)
-      ) {
-        hide(element);
-      }
-    });
-  }
-
-  function isSeparatorLikeElement(element) {
-    const text = getOwnText(element) || getElementLabel(element);
-    const interactive = element.matches('a, button, input, [role="button"], [role="link"]');
-    return !interactive && text.length === 0;
-  }
-
-  function cleanSearchRecommendations(header) {
-    const inputs = header.querySelectorAll(
-      'input[type="search"], input[type="text"], input:not([type])'
-    );
-
-    inputs.forEach((input) => {
-      if (!isLikelyHeaderSearchInput(input)) {
-        return;
-      }
-
-      if (!input.dataset.pureZhihuSearchBound) {
-        input.dataset.pureZhihuSearchBound = 'true';
-        input.addEventListener('input', () => {
-          input.dataset.pureZhihuUserEdited = 'true';
+    document.querySelectorAll('header, .AppHeader').forEach((header) => {
+      const navs = [...header.querySelectorAll(NAVIGATION)].filter((nav) =>
+        [...nav.querySelectorAll('a')].some((a) => {
+          try { return new URL(a.getAttribute('href'), window.location.origin).pathname === '/follow'; }
+          catch (_) { return false; }
+        })
+      );
+      // An answer or article may also have a header. Require a global header marker.
+      if (!header.classList.contains('AppHeader') && navs.length === 0) return;
+      navs.forEach((nav) => {
+        nav.querySelectorAll(CONTROLS).forEach((control) => {
+          const text = getElementLabel(control);
+          if (HEADER_CHANNEL_TEXTS.includes(text) || text.startsWith('AI Works')) hideHeaderControl(control, nav);
         });
-      }
-
-      input.placeholder = '';
-      input.setAttribute('placeholder', '');
-      markSearchContainer(input, header);
-
-      if (
-        input.value &&
-        document.activeElement !== input &&
-        input.dataset.pureZhihuUserEdited !== 'true'
-      ) {
-        input.value = '';
-      }
+        // Current Zhihu uses an empty direct child as the channel divider.
+        [...nav.children].forEach((element) => {
+          if (element.matches('div, span, [role="separator"]') && !getElementLabel(element) &&
+              !element.querySelector(`${CONTROLS}, input, img, svg`)) hide(element);
+        });
+      });
+      header.querySelectorAll('a, button, [role="button"]').forEach((control) => {
+        if (control.closest('[role="tablist"], .Tabs, [role="dialog"], [role="listbox"]')) return;
+        if (HEADER_ACTION_TEXTS.includes(getElementLabel(control))) hide(control);
+      });
+      header.querySelectorAll('input[type="search"], input[type="text"], input:not([type])').forEach((input) => {
+        const container = input.closest('[role="search"], [class*="Search"], [class*="search"]');
+        if (!container || !header.contains(container)) return;
+        if (input.placeholder) input.placeholder = '';
+        container.classList.add(SEARCH_CONTAINER_CLASS);
+        // The value belongs to the user/router (including refresh and back/forward).
+      });
     });
   }
 
-  function markSearchContainer(input, header) {
-    const container =
-      input.closest('form') ||
-      input.closest('[role="search"]') ||
-      input.closest('[class*="Search"], [class*="search"]');
-
-    if (container && header.contains(container)) {
-      container.classList.add(SEARCH_CONTAINER_CLASS);
-    }
-  }
-
-  function findHeaderFollowEntry(header) {
-    return Array.from(header.querySelectorAll('a, button, [role="tab"], [role="link"]')).find(
-      (element) => {
-        const text = getElementLabel(element);
-        const href = element.getAttribute('href') || '';
-        return text === '关注' || (text.length <= 8 && /\/follow(?:ing)?(?:$|[/?#])/.test(href));
-      }
-    );
-  }
-
-  function findHeaderSearchContainer(header) {
-    const input = Array.from(
-      header.querySelectorAll('input[type="search"], input[type="text"], input:not([type])')
-    ).find(isLikelyHeaderSearchInput);
-
-    if (!input) {
-      return null;
-    }
-
-    return (
-      input.closest(`.${SEARCH_CONTAINER_CLASS}`) ||
-      input.closest('form') ||
-      input.closest('[role="search"]') ||
-      input.closest('[class*="Search"], [class*="search"]') ||
-      input
-    );
-  }
-
-  function isHeaderNoiseLabel(text) {
-    if (HEADER_CHANNEL_TEXTS.includes(text) || HEADER_ACTION_TEXTS.includes(text)) {
-      return true;
-    }
-
-    return HEADER_PARTIAL_TEXTS.some((partial) => text.includes(partial));
-  }
-
-  function isLikelyHeaderSearchInput(input) {
-    return Boolean(
-      input.closest('form, [role="search"], [class*="Search"], [class*="search"]')
-    );
-  }
-
-  function findCompactHeaderBlock(element, header) {
-    const clickable = element.closest('a, button, [role="tab"], [role="link"], [role="button"]');
-    if (clickable && header.contains(clickable)) {
-      const listItem = clickable.closest('li');
-      if (listItem && header.contains(listItem) && getElementLabel(listItem).length <= 30) {
-        return listItem;
-      }
-
-      const compactParent = clickable.closest('[class*="Tab"], [class*="Item"]');
-      if (
-        compactParent &&
-        header.contains(compactParent) &&
-        getElementLabel(compactParent).length <= 30
-      ) {
-        return compactParent;
-      }
-
-      return clickable;
-    }
-
-    const compactParent = element.closest('li, [class*="Tab"], [class*="Item"]');
-    if (
-      compactParent &&
-      header.contains(compactParent) &&
-      getElementLabel(compactParent).length <= 30
-    ) {
-      return compactParent;
-    }
-
-    return element;
+  function hideHeaderControl(control, nav) {
+    const item = control.closest('li');
+    // Never hide a shared Tabs/Items wrapper which also contains the Follow entry.
+    hide(item && nav.contains(item) && item.querySelectorAll('a, button').length === 1 ? item : control);
   }
 
   function cleanSidebarBlocks() {
-    const scopedCandidates = uniqueElements([
-      ...document.querySelectorAll(
-        [
-          'aside *',
-          '.GlobalSideBar *',
-          '.TopstorySideBar *',
-          '[class*="SideBar"] *',
-          '[class*="Sidebar"] *',
-          '[class*="sideColumn"] *',
-          '[class*="SideColumn"] *',
-          '[class*="TopSearch"] *',
-          '[class*="Creator"] *',
-          'section',
-          'section *',
-          '.Card',
-          '.Card *',
-          '[class*="Card"]',
-          '[class*="Card"] *'
-        ].join(', ')
-      )
-    ]);
-
-    const textElements = uniqueElements([
-      ...scopedCandidates.filter(matchesBlockedSidebarText),
-      ...findElementsByText(SIDEBAR_BLOCK_TEXTS)
-    ]);
-
-    textElements.forEach((element) => {
-      const block = findSidebarBlockFromAny(element);
-      if (block && isLikelySidebarBlock(block)) {
-        hide(block);
-      }
-    });
-  }
-
-  function matchesBlockedSidebarText(element) {
-    const ownText = getOwnText(element);
-    const text = ownText || getElementLabel(element);
-    return (
-      text.length > 0 &&
-      text.length < 200 &&
-      SIDEBAR_BLOCK_TEXTS.some((blockedText) => text.includes(blockedText))
-    );
-  }
-
-  function findElementsByText(texts) {
-    if (!document.body) {
-      return [];
-    }
-
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-    const elements = [];
-
-    while (walker.nextNode()) {
-      const text = normalizeText(walker.currentNode.textContent);
-      if (texts.some((blockedText) => text.includes(blockedText))) {
-        elements.push(walker.currentNode.parentElement);
-      }
-    }
-
-    return uniqueElements(elements);
-  }
-
-  function findSidebarBlockFromAny(element) {
-    const root = element.closest(
-      'aside, .GlobalSideBar, .TopstorySideBar, [class*="SideBar"], [class*="Sidebar"], [class*="sideColumn"], [class*="SideColumn"]'
-    );
-
-    if (root) {
-      return findSidebarBlock(element, root);
-    }
-
-    return (
-      findRightColumnCard(element) ||
-      element.closest('[class*="TopSearch"], [class*="Creator"], .Card, [class*="Card"], section') ||
-      element
-    );
-  }
-
-  function findRightColumnCard(element) {
-    let current = element;
-    let candidate = null;
-
-    while (current && current !== document.body && current !== document.documentElement) {
-      if (isRightColumnCardShape(current) && containsBlockedSidebarText(current)) {
-        candidate = current;
-      }
-
-      const parent = current.parentElement;
-      if (!parent || isTooLargeForSidebarModule(parent)) {
-        break;
-      }
-
-      current = parent;
-    }
-
-    return candidate;
-  }
-
-  function findSidebarBlock(element, root) {
-    let current = element;
-
-    while (current && current !== root) {
-      if (isSidebarModuleLike(current) || current.parentElement === root) {
-        return current;
-      }
-      current = current.parentElement;
-    }
-
-    return element;
-  }
-
-  function isLikelySidebarBlock(element) {
-    if (
-      element.closest(
-        'aside, .GlobalSideBar, .TopstorySideBar, [class*="SideBar"], [class*="Sidebar"], [class*="sideColumn"], [class*="SideColumn"]'
-      )
-    ) {
-      return true;
-    }
-
-    const className = String(element.className || '');
-    if (className.includes('TopSearch') || className.includes('Creator')) {
-      return true;
-    }
-
-    const rect = element.getBoundingClientRect();
-    return rect.width > 0 && rect.left > window.innerWidth * 0.45;
-  }
-
-  function cleanStrictDynamics() {
-    const mainRoots = uniqueElements([
-      ...document.querySelectorAll(
-        'main, .Topstory-mainColumn, [class*="Topstory-mainColumn"], [class*="List"]'
-      )
-    ]);
-
-    mainRoots.forEach((root) => {
-      const feedItems = Array.from(
-        root.querySelectorAll(
-          '.TopstoryItem, [class*="TopstoryItem"], .List-item, [class*="ListItem"], article, .Card'
-        )
-      );
-
-      feedItems.forEach((item) => {
-        const text = normalizeText(item.textContent);
-        if (isStrictDynamicText(text)) {
-          hide(item, true);
+    // Scope by modules, not every text node in the document or screen coordinates.
+    const candidates = document.querySelectorAll(`${SIDEBAR_ROOTS}, .HotSearchCard, .KfeCollection-CreateSaltCard, .Card`);
+    const titles = new Set();
+    candidates.forEach((candidate) => {
+      if (candidate.closest(CONTENT_ROOTS)) return;
+      [candidate, ...candidate.querySelectorAll('*')].forEach((element) => {
+        if (!element.closest(CONTENT_ROOTS) && SIDEBAR_BLOCK_TEXTS.includes(getOwnText(element))) {
+          titles.add(element);
         }
       });
     });
+    titles.forEach((title) => {
+      const root = title.closest(SIDEBAR_ROOTS);
+      const module = title.closest('.HotSearchCard, .KfeCollection-CreateSaltCard, .Card, section');
+      if (module && (!root || root.contains(module))) {
+        // Salt's Card is only a wrapper around the module; remove the empty card too.
+        const wrapper = module.parentElement;
+        hide(wrapper && wrapper.matches('.Card') && wrapper.children.length === 1 ? wrapper : module);
+      } else if (root) {
+        let block = title;
+        while (block.parentElement && block.parentElement !== root) block = block.parentElement;
+        if (block !== root) hide(block);
+      }
+    });
   }
 
-  function isStrictDynamicText(text) {
-    return STRICT_DYNAMIC_TEXTS.some((dynamicText) => text.includes(dynamicText));
+  function cleanAdvertisements() {
+    // Use the actual ad modules, including image/SVG badges without readable text.
+    document.querySelectorAll(`${AD_MODULES}, .AdvertImg, .Banner-adTag, .Banner-adTag-new`).forEach((marker) => {
+      const module = marker.closest(AD_MODULES) || marker.closest('.Banner-link') || marker;
+      const card = module.closest('.TopstoryItem, .List-item, .Card');
+      hide(card && !module.closest(AD_CONTENT) ? card : module);
+    });
+
+    // A standalone badge handles cards with new/generated CSS names.
+    document.querySelectorAll('.TopstoryItem, .List-item, .Card').forEach((card) => {
+      if (card.closest(AD_CONTENT)) return;
+      const badge = [card, ...card.querySelectorAll('span, div, a, h3')].find((element) =>
+        element.closest('.TopstoryItem, .List-item, .Card') === card &&
+        !element.closest(`${AD_CONTENT}, .ContentItem, .FeedSource`) &&
+        getOwnText(element) === '广告'
+      );
+      if (badge) hide(card);
+    });
   }
 
-  function isLikelyGlobalHeader(element) {
-    if (element.tagName === 'HEADER') {
-      return true;
-    }
+  function cleanStrictDynamics() {
+    document.querySelectorAll('.TopstoryItem').forEach((item) => {
+      const source = item.querySelector('.FeedSource-firstline') || item.querySelector('.FeedSource');
+      if (!source || source.closest('.TopstoryItem') !== item) return;
+      const label = source.cloneNode(true);
+      label.querySelectorAll('.UserLink, .AuthorInfo, a, time').forEach((element) => element.remove());
+      if (/^赞同了(?:回答|文章|想法|视频)(?:$|[\s·\d])/.test(normalizeText(label.textContent))) hide(item, true);
+    });
 
-    const className = String(element.className || '');
-    return className.includes('AppHeader');
-  }
-
-  function isSidebarModuleLike(element) {
-    const className = String(element.className || '');
-    return (
-      element.tagName === 'SECTION' ||
-      className.includes('Card') ||
-      className.includes('Module') ||
-      className.includes('TopSearch') ||
-      className.includes('Creator') ||
-      className.includes('TopstoryItem') === false && isRightColumnCardShape(element)
-    );
-  }
-
-  function isRightColumnCardShape(element) {
-    const rect = element.getBoundingClientRect();
-    return (
-      rect.width >= 220 &&
-      rect.width <= 520 &&
-      rect.height >= 40 &&
-      rect.height <= 760 &&
-      rect.left >= window.innerWidth * 0.42
-    );
-  }
-
-  function isTooLargeForSidebarModule(element) {
-    const rect = element.getBoundingClientRect();
-    return rect.width > 620 || rect.height > 900 || rect.left < window.innerWidth * 0.35;
-  }
-
-  function containsBlockedSidebarText(element) {
-    const text = getElementLabel(element);
-    return SIDEBAR_BLOCK_TEXTS.some((blockedText) => text.includes(blockedText));
+    // Folded groups are independent role=button divs, not FeedSource rows.
+    document.querySelectorAll('.Topstory-feedGroupCollapsedItem, .TopstoryItem button, .TopstoryItem [role="button"]').forEach((entry) => {
+      if (entry.closest(AD_CONTENT)) return;
+      const text = normalizeText(entry.textContent).replace(/\u200b/g, '').trim();
+      if (entry.matches('.Topstory-feedGroupCollapsedItem') || /^还有\s*\d+\s*个.+的动态被收起$/.test(text)) {
+        hide(entry, true);
+      }
+    });
+    // Hide empty wrappers, while preserving groups containing any normal dynamics.
+    document.querySelectorAll('.TopstoryItem-feedList').forEach((group) => {
+      const children = [...group.children].filter((child) => !child.matches('script, style'));
+      if (children.length && children.every((child) => strictHidden.has(child))) hide(group, true);
+    });
   }
 
   function hide(element, strictOnly) {
-    if (!element || element === document.body || element === document.documentElement) {
-      return;
+    if (element && element !== document.body && element !== document.documentElement) {
+      (strictOnly ? strictHidden : hidden).add(element);
     }
-
-    element.classList.add(strictOnly ? STRICT_HIDDEN_CLASS : HIDDEN_CLASS);
   }
 
   function isManagedPage() {
-    return isZhihuHost();
-  }
-
-  function isHomePage() {
-    return window.location.pathname === '/';
-  }
-
-  function isZhihuHost() {
-    return window.location.hostname === 'www.zhihu.com';
+    const hostname = window.location.hostname;
+    return hostname === 'zhihu.com' || hostname.endsWith('.zhihu.com');
   }
 
   function normalizeText(value) {
@@ -671,24 +332,12 @@
   }
 
   function getOwnText(element) {
-    return normalizeText(
-      Array.from(element.childNodes)
-        .filter((node) => node.nodeType === Node.TEXT_NODE)
-        .map((node) => node.textContent)
-        .join(' ')
-    );
+    return normalizeText([...element.childNodes].filter((node) => node.nodeType === Node.TEXT_NODE)
+      .map((node) => node.textContent).join(' '));
   }
 
   function getElementLabel(element) {
-    return normalizeText(
-      element.textContent ||
-        element.getAttribute('aria-label') ||
-        element.getAttribute('title') ||
-        ''
-    );
-  }
-
-  function uniqueElements(elements) {
-    return Array.from(new Set(elements)).filter(Boolean);
+    return normalizeText(element.textContent) || normalizeText(element.getAttribute('aria-label')) ||
+      normalizeText(element.getAttribute('title'));
   }
 })();
