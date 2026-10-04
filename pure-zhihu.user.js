@@ -2,7 +2,7 @@
 // @name         Pure Zhihu
 // @author       squarezhong
 // @namespace    https://github.com/squarezhong/pure-zhihu
-// @version      0.4.7
+// @version      0.4.8
 // @description  大幅简化知乎：默认进入关注流，隐藏广告、顶栏噪音和指定侧栏模块；严格模式过滤赞同动态及折叠动态入口。
 // @homepageURL  https://github.com/squarezhong/pure-zhihu
 // @supportURL   https://github.com/squarezhong/pure-zhihu/issues
@@ -86,7 +86,7 @@
       if (!target) return;
       const style = document.createElement('style');
       style.id = STYLE_ID;
-      style.dataset.pureZhihuVersion = '0.4.7';
+      style.dataset.pureZhihuVersion = '0.4.8';
       style.textContent = `
         ${AD_MODULES.split(', ').map((selector) => `html.${ACTIVE_CLASS} ${selector}`).join(',\n')} {
           display: none !important;
@@ -179,6 +179,7 @@
     strictHidden = new Set();
     if (isManagedPage()) {
       cleanTopChrome();
+      cleanSearchDiscovery();
       cleanSidebarBlocks();
       cleanAdvertisements();
       if (mode === MODE_STRICT && window.location.hostname === 'www.zhihu.com' && /^\/follow\/?$/.test(window.location.pathname)) cleanStrictDynamics();
@@ -243,6 +244,15 @@
     const item = control.closest('li');
     // Never hide a shared Tabs/Items wrapper which also contains the Follow entry.
     hide(item && nav.contains(item) && item.querySelectorAll('a, button').length === 1 ? item : control);
+  }
+
+  function cleanSearchDiscovery() {
+    // Search dropdowns are portaled outside AppHeader. Hide only the discovery
+    // group so history and keyword suggestions in the same menu remain usable.
+    document.querySelectorAll('.SearchBar-menu .AutoComplete-group').forEach((group) => {
+      const label = group.querySelector('.SearchBar-label');
+      if (label && getElementLabel(label) === '搜索发现') hide(group);
+    });
   }
 
   function cleanSidebarBlocks() {
